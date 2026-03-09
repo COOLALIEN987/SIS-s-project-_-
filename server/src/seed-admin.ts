@@ -3,26 +3,27 @@ import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
-async function seed() {
+async function main() {
     try {
-        const existUser = await prisma.user.findUnique({ where: { email: 'admin@sis.club' } });
-        if (existUser) {
-            console.log('User already exists');
-            return;
-        }
+        console.log('🌱 Seeding local SQLite database...');
 
-        const tenant = await prisma.tenant.create({
-            data: {
+        // 1. Create the Tenant first (Parent)
+        const tenant = await prisma.tenant.upsert({
+            where: { slug: 'antigravity-club' },
+            update: {},
+            create: {
                 name: 'Antigravity Club',
                 slug: 'antigravity-club',
                 plan: 'PRO'
             }
         });
 
+        // 2. Create the Admin User (Child)
         const hash = await bcrypt.hash('password123', 12);
-
-        await prisma.user.create({
-            data: {
+        await prisma.user.upsert({
+            where: { email: 'admin@sis.club' },
+            update: {},
+            create: {
                 name: 'Admin',
                 email: 'admin@sis.club',
                 passwordHash: hash,
@@ -31,12 +32,12 @@ async function seed() {
             }
         });
 
-        console.log('Admin user seeded!');
+        console.log('✅ Admin and Tenant seeded! You can now access all routes.');
     } catch (err) {
-        console.error(err);
+        console.error('❌ Seed failed:', err);
     } finally {
         await prisma.$disconnect();
     }
 }
 
-seed();
+main();

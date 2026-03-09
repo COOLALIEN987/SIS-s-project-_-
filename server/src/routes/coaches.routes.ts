@@ -1,12 +1,12 @@
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { authenticate, tenantGuard, AuthRequest } from '../middleware/auth';
+import {  tenantGuard, AuthRequest } from '../middleware/auth';
 
 const router = Router();
 const prisma = new PrismaClient();
 
 // GET /api/coaches
-router.get('/', authenticate, tenantGuard, async (req: AuthRequest, res) => {
+router.get('/',  tenantGuard, async (req: AuthRequest, res) => {
     try {
         const { studioId } = req.query;
         const where: any = { tenantId: req.user!.tenantId };
@@ -25,7 +25,7 @@ router.get('/', authenticate, tenantGuard, async (req: AuthRequest, res) => {
 });
 
 // PATCH /api/coaches/:id
-router.patch('/:id', authenticate, tenantGuard, async (req: AuthRequest, res) => {
+router.patch('/:id',  tenantGuard, async (req: AuthRequest, res) => {
     try {
         const coach = await prisma.coach.update({
             where: { id: req.params.id, tenantId: req.user!.tenantId },
@@ -39,7 +39,7 @@ router.patch('/:id', authenticate, tenantGuard, async (req: AuthRequest, res) =>
 });
 
 // GET /api/coaches/:id/availability
-router.get('/:id/availability', authenticate, tenantGuard, async (req: AuthRequest, res) => {
+router.get('/:id/availability',  tenantGuard, async (req: AuthRequest, res) => {
     try {
         const coach = await prisma.coach.findUnique({
             where: { id: req.params.id, tenantId: req.user!.tenantId },

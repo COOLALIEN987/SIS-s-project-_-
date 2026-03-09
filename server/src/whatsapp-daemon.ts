@@ -37,27 +37,40 @@ app.post('/api/whatsapp/init', async (req, res) => {
         qrcodeTerminal.generate(qr, { small: true });
     });
 
-    client.on('ready', () => {
-        console.log(`[Daemon] WhatsApp client for tenant ${tenantId} is READY!`);
-    });
-
-    client.on('authenticated', () => {
-        console.log(`[Daemon] WhatsApp client for tenant ${tenantId} AUTHENTICATED`);
-    });
-
-    client.on('auth_failure', (msg) => {
-        console.error(`[Daemon] WhatsApp auth failure for ${tenantId}:`, msg);
-    });
-
+    client.on('ready', () => console.log(`[Daemon] WhatsApp client for tenant ${tenantId} is READY!`));
+    client.on('authenticated', () => console.log(`[Daemon] WhatsApp client for tenant ${tenantId} AUTHENTICATED`));
+    client.on('auth_failure', (msg) => console.error(`[Daemon] WhatsApp auth failure for ${tenantId}:`, msg));
+    
     client.on('disconnected', (reason) => {
         console.log(`[Daemon] WhatsApp client disconnected for ${tenantId}: ${reason}`);
         clients.delete(tenantId);
     });
 
+    // --- THE FIX: FORWARD MESSAGES TO MAIN SERVER WEBHOOK ---
+// --- THE FIX: FORWARD MESSAGES TO MAIN SERVER WEBHOOK ---
     client.on('message', async (message: Message) => {
         if (message.from === 'status@broadcast') return;
-        // The main server will handle DB logging. We could forward this to a webhook on the main server if needed.
+        
         console.log(`[Daemon] Incoming message from ${message.from}: ${message.body}`);
+
+        try {
+            // TYPE-SAFE FIX: Get the official contact profile instead of using private _data
+            const contact = await message.getContact();
+            const notifyName = contact.pushname || contact.name || 'User';
+
+            await fetch('http://localhost:3000/api/whatsapp/webhook', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    tenantId,
+                    from: message.from,
+                    body: message.body,
+                    notifyName: notifyName
+                })
+            });
+        } catch (error) {
+            console.error(`[Daemon] Failed to reach main server webhook:`, error);
+        }
     });
 
     clients.set(tenantId, client);
@@ -74,26 +87,19 @@ app.post('/api/whatsapp/init', async (req, res) => {
 
 app.post('/api/whatsapp/send', async (req, res) => {
     const { tenantId, to, message } = req.body;
-    if (!tenantId || !to || !message) {
-        return res.status(400).json({ error: 'tenantId, to, and message are required' });
-    }
+    if (!tenantId || !to || !message) return res.status(400).json({ error: 'Missing data' });
 
     const client = clients.get(tenantId);
-    if (!client) {
-        return res.status(400).json({ error: 'Client not initialized on this daemon' });
-    }
+    if (!client) return res.status(400).json({ error: 'Client not initialized on this daemon' });
 
     try {
         const state = await client.getState();
-        if (state !== 'CONNECTED') {
-            return res.status(400).json({ error: 'Client not connected' });
-        }
+        if (state !== 'CONNECTED') return res.status(400).json({ error: 'Client not connected' });
 
         const chatId = `${to.replace(/[^0-9]/g, '')}@c.us`;
         await client.sendMessage(chatId, message);
         res.json({ success: true, message: 'Message sent' });
     } catch (error: any) {
-        console.error(`[Daemon] Send error:`, error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -103,19 +109,15 @@ app.get('/api/whatsapp/status', async (req, res) => {
     if (!tenantId || typeof tenantId !== 'string') return res.status(400).json({ error: 'tenantId required' });
 
     const client = clients.get(tenantId);
-    if (!client) {
-        return res.json({ status: 'DISCONNECTED' });
-    }
+    if (!client) return res.json({ status: 'DISCONNECTED' });
 
     try {
         const state = await client.getState();
         res.json({ status: state === 'CONNECTED' ? 'CONNECTED' : 'INITIALIZING' });
     } catch {
-        res.json({ status: 'INITIALIZING' }); // usually means it's waiting for QR
+        res.json({ status: 'INITIALIZING' }); 
     }
 });
 
 const PORT = process.env.DAEMON_PORT || 3002;
-app.listen(PORT, () => {
-    console.log(`WhatsApp Terminal Daemon running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`WhatsApp Terminal Daemon running on port ${PORT}`));

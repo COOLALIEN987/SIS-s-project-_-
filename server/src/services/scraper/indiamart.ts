@@ -1,9 +1,10 @@
-import fetch from 'node-fetch';
 import { PrismaClient } from '@prisma/client';
 import { validateAndFormatPhone } from '../../utils/phone.util';
 import { extractLeadsFromText } from '../ai.service';
-import * as cheerio from 'cheerio';
+import puppeteer from 'puppeteer-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 
+puppeteer.use(StealthPlugin());
 const prisma = new PrismaClient();
 
 export async function scrapeIndiaMart(query: string, city: string, tenantId: string) {
@@ -13,22 +14,24 @@ export async function scrapeIndiaMart(query: string, city: string, tenantId: str
     const rejectionReasons: Record<string, number> = { 'no_phone': 0, 'invalid_phone': 0, 'duplicate': 0 };
 
     try {
-        console.log(`[DuckDuckGo + Gemini AI] Searching IndiaMart for ${query} in ${city}...`);
+        console.log(`[Stealth Puppeteer + Gemini AI] Searching IndiaMart for ${query} in ${city}...`);
 
-        const searchQuery = encodeURIComponent(`site:dir.indiamart.com "${query}" "${city}" contact OR phone OR +91`);
-        const res = await fetch(`https://html.duckduckgo.com/html/?q=${searchQuery}`, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            }
+        const browser = await puppeteer.launch({ 
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox']
         });
+        const page = await browser.newPage();
+        
+        // Search Google for IndiaMart directories to bypass DDG/Bing bot blocks
+        const searchQuery = encodeURIComponent(`site:dir.indiamart.com "${query}" "${city}" contact OR phone OR +91`);
+        await page.goto(`https://www.google.com/search?q=${searchQuery}`, { waitUntil: 'domcontentloaded' });
+        
+        // Extract all visible text from the search results
+        const cleanText = await page.evaluate(() => document.body.innerText.replace(/\s+/g, ' ').trim());
+        await browser.close();
 
-        const html = await res.text();
-        const $ = cheerio.load(html);
-        $('script, style, noscript').remove();
-        const cleanHtml = $('body').text().replace(/\s+/g, ' ').trim();
-
-        console.log(`Sending ${cleanHtml.length} chars to Gemini AI for deep extraction...`);
-        const aiLeads = await extractLeadsFromText(cleanHtml, 'INDIAMART');
+        console.log(`Sending ${cleanText.length} chars to Gemini AI for deep extraction...`);
+        const aiLeads = await extractLeadsFromText(cleanText, 'INDIAMART');
 
         recordsFound = aiLeads.length;
 

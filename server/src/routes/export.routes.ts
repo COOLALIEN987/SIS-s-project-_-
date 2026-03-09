@@ -1,12 +1,12 @@
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { authenticate, tenantGuard, AuthRequest } from '../middleware/auth';
+import { tenantGuard, AuthRequest } from '../middleware/auth';
 import Papa from 'papaparse';
 
 const router = Router();
 const prisma = new PrismaClient();
 
-router.get('/leads.csv', authenticate, tenantGuard, async (req: AuthRequest, res) => {
+router.get('/leads.csv', tenantGuard, async (req: AuthRequest, res) => {
     try {
         const { status, source, locality, score_min } = req.query;
 

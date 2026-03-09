@@ -10,6 +10,13 @@ interface ScraperJob {
     recordsFound: number;
     recordsSaved: number;
     recordsRejected: number;
+    // Added rejectionReasons to pull the duplicate count from the backend
+    rejectionReasons?: {
+        duplicate?: number;
+        invalid_phone?: number;
+        no_phone?: number;
+        [key: string]: any;
+    };
     error: string | null;
     createdAt: string;
 }
@@ -79,33 +86,55 @@ export function ScraperJobsList() {
                 </h3>
             </div>
             <div className="divide-y divide-border overflow-y-auto flex-1">
-                {jobs.slice(0, 5).map(job => (
-                    <div key={job.id} className="p-4 hover:bg-secondary/20 transition-colors">
-                        <div className="flex justify-between items-start mb-2">
-                            <div className="flex items-center gap-2">
-                                {getStatusIcon(job.status)}
-                                <span className="font-medium text-sm text-foreground">{job.source} - {job.query}</span>
+                {jobs.slice(0, 5).map(job => {
+                    // Safely extract the duplicate count (default to 0 if not found)
+                    const duplicateCount = job.rejectionReasons?.duplicate || 0;
+                    
+                    return (
+                        <div key={job.id} className="p-4 hover:bg-secondary/20 transition-colors">
+                            <div className="flex justify-between items-start mb-2">
+                                <div className="flex items-center gap-2">
+                                    {getStatusIcon(job.status)}
+                                    <span className="font-medium text-sm text-foreground">{job.source} - {job.query}</span>
+                                </div>
+                                <span className="text-xs text-muted-foreground">{new Date(job.createdAt).toLocaleTimeString()}</span>
                             </div>
-                            <span className="text-xs text-muted-foreground">{new Date(job.createdAt).toLocaleTimeString()}</span>
+
+                            <div className="text-sm text-muted-foreground mb-3">Target: {job.city}</div>
+
+                            {job.status === 'COMPLETED' && (
+                                <div className="flex flex-wrap gap-2 text-xs">
+                                    <div className="bg-secondary p-1.5 rounded border border-border">
+                                        <span className="text-foreground font-medium">{job.recordsFound}</span> found
+                                    </div>
+                                    <div className="bg-green-500/10 text-green-500 p-1.5 rounded border border-green-500/20">
+                                        <span className="font-medium">{job.recordsSaved}</span> saved
+                                    </div>
+                                    
+                                    {/* THE REPEATED UI FIX */}
+                                    {duplicateCount > 0 && (
+                                        <div className="bg-yellow-500/10 text-yellow-500 p-1.5 rounded border border-yellow-500/20">
+                                            <span className="font-medium">{duplicateCount}</span> repeated
+                                        </div>
+                                    )}
+
+                                    {/* We subtract duplicates from total rejected so it represents "bad" leads */}
+                                    {(job.recordsRejected - duplicateCount) > 0 && (
+                                        <div className="bg-destructive/10 text-red-400 p-1.5 rounded border border-destructive/20">
+                                            <span className="font-medium">{job.recordsRejected - duplicateCount}</span> bad
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {job.status === 'FAILED' && job.error && (
+                                <div className="text-xs text-destructive mt-2 bg-destructive/10 p-2 rounded">
+                                    {job.error}
+                                </div>
+                            )}
                         </div>
-
-                        <div className="text-sm text-muted-foreground mb-2">Target: {job.city}</div>
-
-                        {job.status === 'COMPLETED' && (
-                            <div className="flex gap-4 text-xs mt-2 bg-secondary/50 p-2 rounded">
-                                <div><span className="text-foreground font-medium">{job.recordsFound}</span> found</div>
-                                <div className="text-green-500"><span className="font-medium">{job.recordsSaved}</span> saved</div>
-                                <div className="text-red-400"><span className="font-medium">{job.recordsRejected}</span> rejected</div>
-                            </div>
-                        )}
-
-                        {job.status === 'FAILED' && job.error && (
-                            <div className="text-xs text-destructive mt-2 bg-destructive/10 p-2 rounded">
-                                {job.error}
-                            </div>
-                        )}
-                    </div>
-                ))}
+                    );
+                })}
             </div>
         </div>
     );

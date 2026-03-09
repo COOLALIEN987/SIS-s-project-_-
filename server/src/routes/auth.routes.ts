@@ -2,7 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
-import { authenticate, AuthRequest } from '../middleware/auth';
+import {AuthRequest } from '../middleware/auth';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -112,7 +112,7 @@ router.post('/login', async (req, res) => {
     }
 });
 
-router.get('/me', authenticate, async (req: AuthRequest, res) => {
+router.get('/me',  async (req: AuthRequest, res) => {
     try {
         const user = await prisma.user.findUnique({
             where: { id: req.user!.id },

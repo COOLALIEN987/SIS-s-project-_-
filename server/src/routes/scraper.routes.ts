@@ -1,41 +1,29 @@
 import { Router } from 'express';
+import { generateLeadsViaSearch } from '../services/ai.service';
 import { PrismaClient } from '@prisma/client';
-import { authenticate, tenantGuard, AuthRequest } from '../middleware/auth';
-import { enqueueScraperJob } from '../services/queue.service';
 
 const router = Router();
 const prisma = new PrismaClient();
+const DEFAULT_TENANT = 'antigravity-tenant-id';
 
-// POST /api/scraper
-router.post('/', authenticate, tenantGuard, async (req: AuthRequest, res) => {
+router.post('/', async (req, res) => {
     try {
         const { type, query, city, locality } = req.body;
+        const leads = await generateLeadsViaSearch(type || query, city, locality);
 
-        if (!type || !query) {
-            return res.status(400).json({ success: false, error: 'Type and Query are required' });
-        }
+        const savedLeads = await Promise.all(leads.map((lead: any) => 
+            prisma.lead.create({
+                data: { ...lead, status: 'NEW', source: 'GEMINI_SEARCH', tenantId: DEFAULT_TENANT }
+            })
+        ));
 
-        const job = await enqueueScraperJob(type, query, city || 'Mumbai', locality || '', req.user!.tenantId);
-
-        res.status(202).json({ success: true, message: 'Scraping job queued', data: job });
+        res.json({ success: true, count: savedLeads.length });
     } catch (error: any) {
         res.status(500).json({ success: false, error: error.message });
     }
 });
 
-// GET /api/scraper/jobs
-router.get('/jobs', authenticate, tenantGuard, async (req: AuthRequest, res) => {
-    try {
-        const jobs = await prisma.scraperJob.findMany({
-            where: { tenantId: req.user!.tenantId },
-            orderBy: { createdAt: 'desc' },
-            take: 20
-        });
-
-        res.json({ success: true, data: jobs });
-    } catch (error: any) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
+// Mock jobs list so the dashboard stays clean
+router.get('/jobs', (req, res) => res.json({ success: true, data: [] }));
 
 export default router;

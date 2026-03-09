@@ -1,9 +1,10 @@
-import fetch from 'node-fetch';
 import { PrismaClient } from '@prisma/client';
 import { validateAndFormatPhone } from '../../utils/phone.util';
 import { extractLeadsFromText } from '../ai.service';
-import * as cheerio from 'cheerio';
+import puppeteer from 'puppeteer-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 
+puppeteer.use(StealthPlugin());
 const prisma = new PrismaClient();
 
 export async function scrapeLinkedIn(query: string, city: string, tenantId: string) {
@@ -13,21 +14,22 @@ export async function scrapeLinkedIn(query: string, city: string, tenantId: stri
     const rejectionReasons: Record<string, number> = { 'no_phone': 0, 'invalid_phone': 0, 'duplicate': 0, 'ai_rejected': 0 };
 
     try {
-        console.log(`[Bing HTML Scraper + Gemini AI] Searching LinkedIn for ${query} in ${city}...`);
+        console.log(`[Stealth Puppeteer + Gemini AI] Searching LinkedIn for ${query} in ${city}...`);
 
-        const searchQuery = encodeURIComponent(`site:linkedin.com/in "${query}" "${city}" "+91"`);
-        const res = await fetch(`https://www.bing.com/search?q=${searchQuery}`, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edge/120.0.0.0'
-            }
+        const browser = await puppeteer.launch({ 
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox']
         });
+        const page = await browser.newPage();
+        
+        // Go directly to Google using stealth mode to avoid Bot/Captcha triggers
+        const searchQuery = encodeURIComponent(`site:linkedin.com/in "${query}" "${city}" "+91"`);
+        await page.goto(`https://www.google.com/search?q=${searchQuery}`, { waitUntil: 'domcontentloaded' });
+        
+        // Extract the raw text from the search results
+        const cleanHtml = await page.evaluate(() => document.body.innerText.replace(/\s+/g, ' ').trim());
+        await browser.close();
 
-        const html = await res.text();
-        const $ = cheerio.load(html);
-        $('script, style, noscript').remove();
-        const cleanHtml = $('body').text().replace(/\s+/g, ' ').trim();
-
-        // Deep Analysis via Gemini 1.5 Flash
         console.log(`Sending ${cleanHtml.length} chars to Gemini AI for deep extraction...`);
         const aiLeads = await extractLeadsFromText(cleanHtml, 'LINKEDIN');
 

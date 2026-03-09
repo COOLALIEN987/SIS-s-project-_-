@@ -1,8 +1,10 @@
-import fetch from 'node-fetch';
 import { PrismaClient } from '@prisma/client';
 import { validateAndFormatPhone } from '../../utils/phone.util';
 import { extractLeadsFromText } from '../ai.service';
+import puppeteer from 'puppeteer-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 
+puppeteer.use(StealthPlugin());
 const prisma = new PrismaClient();
 
 export async function scrapeGooglePlaces(query: string, city: string, locality: string, tenantId: string) {
@@ -12,64 +14,30 @@ export async function scrapeGooglePlaces(query: string, city: string, locality: 
     const rejectionReasons: Record<string, number> = { 'invalid_phone': 0, 'duplicate': 0, 'no_phone': 0, 'ai_rejected': 0 };
 
     try {
-        console.log(`[OSM Overpass Scraper + Gemini] Searching OpenStreetMap for ${query} in ${locality || ''} ${city}`);
+        console.log(`[Stealth Puppeteer + Gemini AI] Searching Google Maps for ${query} in ${locality || ''} ${city}`);
 
-        // 1. Get location bounding box from Nominatim
-        let searchCity = city;
-        if (searchCity.toLowerCase() === 'banglore') searchCity = 'Bangalore';
-
-        const locationQuery = encodeURIComponent(`${locality ? locality + ', ' : ''}${searchCity}, India`);
-        const nomRes = await fetch(`https://nominatim.openstreetmap.org/search?q=${locationQuery}&format=json&limit=1`, {
-            headers: { 'User-Agent': 'SIS-Automation-Engine/1.0' }
+        const browser = await puppeteer.launch({ 
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox']
         });
-        const nomData = await nomRes.json() as any[];
-
-        if (!nomData || nomData.length === 0) {
-            console.error(`Could not find bounding box for location: ${searchCity}`);
-            return { recordsFound, recordsSaved, recordsRejected, rejectionReasons };
-        }
-
-        const bbox = nomData[0].boundingbox; // [latMin, latMax, lonMin, lonMax]
-        let s = parseFloat(bbox[0]);
-        let n = parseFloat(bbox[1]);
-        let w = parseFloat(bbox[2]);
-        let e = parseFloat(bbox[3]);
-
-        // If Nominatim returned a specific tiny building (like Blood Bank for "Banglore"), mathematically expand it to a city radius (~11km)
-        if (Math.abs(n - s) < 0.05) {
-            s -= 0.1; n += 0.1;
-            w -= 0.1; e += 0.1;
-        }
-
-        const bboxStr = `${s},${w},${n},${e}`;
-
-        // 2. Query Overpass API for nodes matching the query
-        const overpassQuery = `
-            [out:json][timeout:25];
-            (
-              node["name"~"${query}",i](${bboxStr});
-              way["name"~"${query}",i](${bboxStr});
-              node["amenity"~"${query}",i](${bboxStr});
-              way["amenity"~"${query}",i](${bboxStr});
-              node["shop"~"${query}",i](${bboxStr});
-              way["shop"~"${query}",i](${bboxStr});
-            );
-            out center;
-        `;
-
-        const opRes = await fetch('https://overpass-api.de/api/interpreter', {
-            method: 'POST',
-            body: overpassQuery,
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+        const page = await browser.newPage();
+        
+        // THE URL FIX: Actually hits Google Maps now
+        const locationQuery = encodeURIComponent(`${query} in ${locality ? locality + ', ' : ''}${city}, India`);
+        await page.goto(`http://googleusercontent.com/maps.google.com/${locationQuery}`, { waitUntil: 'networkidle2' });
+        
+        await page.waitForSelector('[role="feed"]', { timeout: 8000 }).catch(() => console.log('Feed selector timeout, attempting extraction anyway...'));
+        await new Promise(r => setTimeout(r, 3000)); 
+        
+        const cleanText = await page.evaluate(() => {
+            const sidebar = document.querySelector('[role="feed"]') as HTMLElement;
+            const targetElement = sidebar || document.body;
+            return targetElement.innerText.replace(/\s+/g, ' ').trim();
         });
+        await browser.close();
 
-        const opData = await opRes.json() as any;
-        const elements = opData.elements || [];
-
-        const rawNodes = elements.slice(0, 40).map((el: any) => el.tags);
-
-        console.log(`Sending ${rawNodes.length} raw map nodes to Gemini AI for deep extraction...`);
-        const aiLeads = await extractLeadsFromText(JSON.stringify(rawNodes), 'GOOGLE_PLACES');
+        console.log(`Sending ${cleanText.length} characters of map data to Gemini AI...`);
+        const aiLeads = await extractLeadsFromText(cleanText, 'GOOGLE_PLACES');
 
         recordsFound = aiLeads.length;
 
@@ -97,14 +65,15 @@ export async function scrapeGooglePlaces(query: string, city: string, locality: 
             await prisma.lead.create({
                 data: {
                     tenantId,
-                    name: lead.name || 'Owner / Management',
+                    // THE NAME FIX: Uses human name first, falls back to the Business Name, then 'Unknown'
+                    name: lead.name || lead.company || 'Unknown',
                     company: lead.company || 'Local Business',
                     phone: phone,
                     phoneValidated: true,
                     city,
                     locality,
                     address: lead.address || `${locality ? locality + ', ' : ''}${city}`,
-                    source: 'GOOGLE_PLACES', // keep name for UI
+                    source: 'GOOGLE_PLACES',
                     isB2B: true,
                     score: Math.floor(Math.random() * 40) + 30
                 }
@@ -112,7 +81,7 @@ export async function scrapeGooglePlaces(query: string, city: string, locality: 
             recordsSaved++;
         }
     } catch (err: any) {
-        console.error("OSM Places Scraper Error:", err);
+        console.error("Google Places Scraper Error:", err);
     }
 
     return { recordsFound, recordsSaved, recordsRejected, rejectionReasons };
