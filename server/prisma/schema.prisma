@@ -1,0 +1,267 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Tenant {
+  id              String   @id @default(cuid())
+  name            String   // e.g. "Antigravity Club"
+  slug            String   @unique
+  plan            String   @default("FREE")
+  whatsappReady   Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  users           User[]
+  leads           Lead[]
+  members         Member[]
+  coaches         Coach[]
+  studios         Studio[]
+  campaigns       Campaign[]
+  scraperJobs     ScraperJob[]
+  trialBookings   TrialBooking[]
+  whatsappSession WhatsappSession?
+}
+
+model WhatsappSession {
+  id          String   @id @default(cuid())
+  tenantId    String   @unique
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  status      String   @default("DISCONNECTED")
+  lastQrCode  String?
+  updatedAt   DateTime @updatedAt
+}
+
+model Studio {
+  id        String  @id @default(cuid())
+  tenantId  String
+  tenant    Tenant  @relation(fields: [tenantId], references: [id])
+  name      String  // "Bandra" | "South Mumbai" | "Juhu"
+  address   String
+  phone     String
+  lat       Float
+  lng       Float
+  capacity  Int     @default(20) // max concurrent members
+  leads     Lead[]  @relation("NearestStudio")
+  members   Member[]
+  coaches   Coach[]
+}
+
+model User {
+  id           String   @id @default(cuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         String     @default("AGENT")
+  createdAt    DateTime   @default(now())
+  interactions Interaction[]
+  assignedLeads Lead[]
+}
+
+model Lead {
+  id               String     @id @default(cuid())
+  tenantId         String
+  tenant           Tenant     @relation(fields: [tenantId], references: [id])
+  
+  // CONTACT INFO
+  name             String
+  phone            String?    
+  phoneValidated   Boolean    @default(false)
+  email            String?
+  
+  // PROFILE
+  occupation       String?    
+  company          String?
+  linkedinUrl      String?
+  instagramHandle  String?
+  
+  // LOCATION
+  city             String     @default("Mumbai")
+  locality         String?    
+  address          String?
+  lat              Float?
+  lng              Float?
+  nearestStudioId  String?
+  nearestStudio    Studio?    @relation("NearestStudio", fields: [nearestStudioId], references: [id])
+  distanceToStudio Float?     
+  
+  // LEAD METADATA
+  source           String     @default("MANUAL")
+  status           String     @default("NEW")
+  score            Int        @default(0)   
+  isB2B            Boolean    @default(false)
+  persona          String?    
+  referredById     String?    
+  referredBy       Member?    @relation("ReferredLeads", fields: [referredById], references: [id])
+  tags             String     @default("")
+  
+  // AI CACHE
+  aiSummary        String?
+  aiSummaryHash    String?
+  aiNextAction     String?
+  churnRisk        String?
+  
+  // TRACKING
+  assignedToId     String?
+  assignedTo       User?      @relation(fields: [assignedToId], references: [id])
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  lastContactedAt  DateTime?
+  convertedAt      DateTime?
+  
+  // RELATIONS
+  interactions     Interaction[]
+  trialBooking     TrialBooking?
+  member           Member?
+}
+
+model TrialBooking {
+  id          String    @id @default(cuid())
+  tenantId    String
+  tenant      Tenant    @relation(fields: [tenantId], references: [id])
+  leadId      String    @unique
+  lead        Lead      @relation(fields: [leadId], references: [id])
+  studioId    String
+  coachId     String?
+  coach       Coach?    @relation(fields: [coachId], references: [id])
+  scheduledAt DateTime
+  status      String    @default("PENDING") 
+  outcome     String?   
+  coachNotes  String?
+  createdAt   DateTime  @default(now())
+}
+
+model Member {
+  id               String    @id @default(cuid())
+  tenantId         String
+  tenant           Tenant    @relation(fields: [tenantId], references: [id])
+  leadId           String    @unique
+  lead             Lead      @relation(fields: [leadId], references: [id])
+  studioId         String
+  studio           Studio    @relation(fields: [studioId], references: [id])
+  coachId          String
+  coach            Coach     @relation(fields: [coachId], references: [id])
+  
+  // MEMBERSHIP
+  plan             String    
+  frequency        String    
+  memberSince      DateTime  @default(now())
+  currentTermStart DateTime
+  currentTermEnd   DateTime
+  termMonths       Int       
+  monthlyRate      Float     
+  totalPaid        Float     @default(0)
+  lifetimeValue    Float     @default(0)
+  
+  // RENEWAL TRACKING
+  renewalStatus    String    @default("ACTIVE") 
+  renewalReminder30Sent Boolean @default(false)
+  renewalReminder15Sent Boolean @default(false)
+  renewalReminder7Sent  Boolean @default(false)
+  renewalReminder1Sent  Boolean @default(false)
+  
+  // ENGAGEMENT
+  totalSessions    Int       @default(0)
+  lastSessionAt    DateTime?
+  attendanceRate   Float     @default(0) 
+  npsScore         Int?      
+  birthday         DateTime?
+  churnRisk        String    @default("LOW") 
+  
+  // REFERRALS
+  referralCode     String    @unique @default(cuid()) 
+  referralCount    Int       @default(0)
+  referredLeads    Lead[]    @relation("ReferredLeads")
+  
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
+
+model Coach {
+  id           String         @id @default(cuid())
+  tenantId     String
+  tenant       Tenant         @relation(fields: [tenantId], references: [id])
+  studioId     String
+  studio       Studio         @relation(fields: [studioId], references: [id])
+  name         String
+  phone        String?
+  email        String?
+  speciality   String?        
+  maxClients   Int            @default(15)
+  currentLoad  Int            @default(0)
+  isAvailable  Boolean        @default(true)
+  members      Member[]
+  trialBookings TrialBooking[]
+}
+
+model Interaction {
+  id        String          @id @default(cuid())
+  leadId    String
+  lead      Lead            @relation(fields: [leadId], references: [id])
+  agentId   String?
+  agent     User?           @relation(fields: [agentId], references: [id])
+  type      String
+  date      DateTime        @default(now())
+  outcome   String?
+  notes     String?
+}
+
+model Campaign {
+  id              String   @id @default(cuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id])
+  name            String
+  type            String   
+  status          String   @default("DRAFT")
+  targetSegment   String   @default("{}")
+  messageTemplate String
+  scheduledAt     DateTime?
+  sentCount       Int      @default(0)
+  replyCount      Int      @default(0)
+  createdAt       DateTime @default(now())
+}
+
+model ScraperJob {
+  id           String   @id @default(cuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+  source       String
+  query        String
+  city         String   @default("Mumbai")
+  locality     String?
+  status       String   @default("PENDING")
+  recordsFound Int      @default(0)
+  recordsSaved Int      @default(0)
+  recordsRejected Int   @default(0) 
+  rejectionReasons String? 
+  error        String?
+  startedAt    DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime @default(now())
+}
+
+model AiJobLog {
+  id         String   @id @default(cuid())
+  type       String
+  leadId     String?
+  tokensUsed Int
+  durationMs Int
+  success    Boolean
+  createdAt  DateTime @default(now())
+}
+
+model CompetitorWatch {
+  id          String   @id @default(cuid())
+  tenantId    String
+  name        String   
+  address     String
+  locality    String
+  rating      Float?
+  reviewCount Int?
+  lastChecked DateTime @default(now())
+  priceRange  String?
+}
